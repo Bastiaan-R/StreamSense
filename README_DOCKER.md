@@ -9,12 +9,18 @@ This guide explains how to host your StreamSense application using Docker and Do
 
 ## Configuration
 
-1. **Environment Variables**: Open the `docker-compose.yml` file and update the `environment` section with your actual credentials:
-   - `JELLYFIN_URL`: The URL of your Jellyfin server.
-   - `JELLYFIN_API_KEY`: Your Jellyfin API key.
-   - `SEERR_URL`: The URL of your Jellyseerr/Overseerr instance.
-   - `SEERR_API_KEY`: Your Seerr API key.
-   - `TMDB_READ_ACCESS_TOKEN`: Your TMDB API Read Access Token.
+You have two ways to configure StreamSense:
+
+### Option A: In-App Setup Wizard (Recommended)
+Simply start the container and navigate to the app in your browser. If it's your first time, you'll be greeted by a **Setup Wizard** that will walk you through connecting Jellyfin, TMDB, and Gemini.
+
+### Option B: Environment Variables
+You can pre-configure the application by filling out the `environment` section in `docker-compose.yml` or by creating a `.env` file. These values act as defaults.
+
+1. **Environment Variables**: Update the `environment` section in `docker-compose.yml` or create a `.env` file:
+   - `JELLYFIN_URL`: Your Jellyfin server URL.
+   - `JELLYFIN_API_KEY`: A Jellyfin API key.
+   - `TMDB_READ_ACCESS_TOKEN`: Your TMDB v4 Token.
    - `GEMINI_API_KEY`: Your Google Gemini API Key.
 
 ## Deployment
