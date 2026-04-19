@@ -1,0 +1,28 @@
+services:
+  streamsense:
+    # Replace 'yourusername' with your GitHub username
+    image: ghcr.io/${DOCKER_USERNAME:-yourusername}/${DOCKER_REPO:-streamsense}:latest
+    container_name: streamsense
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_PATH=/app/data/cinema_sense.db
+      - JELLYFIN_URL=${JELLYFIN_URL}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      - TMDB_READ_ACCESS_TOKEN=${TMDB_READ_ACCESS_TOKEN}
+      - SEERR_URL=${SEERR_URL}
+      - SEERR_API_KEY=${SEERR_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  # Optional: Automatically update the container when a new image is published to GHCR
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   container_name: watchtower
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   command: --interval 3600 --cleanup streamsense
+  #   restart: unless-stopped

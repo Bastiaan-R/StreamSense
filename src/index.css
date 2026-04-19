@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-deep: #0f0c29;
+  --color-glass: rgba(255, 255, 255, 0.06);
+  --color-glass-border: rgba(255, 255, 255, 0.12);
+  --color-text-main: #ffffff;
+  --color-text-dim: rgba(255, 255, 255, 0.6);
+  --color-accent: #00d2ff;
+  --color-accent-glow: rgba(0, 210, 255, 0.4);
+  --color-success: #00ff88;
+}
+
+@layer base {
+  body {
+    @apply bg-bg-deep text-text-main antialiased w-full overflow-x-hidden overflow-y-auto;
+    background: radial-gradient(circle at 0% 0%, #302b63 0%, #24243e 50%, #0f0c29 100%);
+    min-height: 100vh;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-glass backdrop-blur-xl border border-glass-border;
+  }
+  
+  .sidebar-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-text-dim transition-all hover:bg-glass hover:text-text-main;
+  }
+  
+  .sidebar-item-active {
+    @apply bg-glass text-text-main border border-glass-border shadow-[0_0_15px_rgba(255,255,255,0.05)];
+  }
+
+  .accent-text {
+    @apply bg-gradient-to-r from-white to-accent bg-clip-text text-transparent font-bold;
+  }
+
+  .status-dot {
+    @apply w-2 h-2 rounded-full bg-success shadow-[0_0_8px_var(--color-success)];
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    height: 4px;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+  }
+  
+  .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "StreamSense - Main",
+  "description": "A dashboard to fetch Jellyfin watch history using Playback Reporting, generate AI recommendations using Gemini, and request them via Overseerr/Jellyseerr.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
