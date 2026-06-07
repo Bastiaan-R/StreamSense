@@ -32,7 +32,6 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.ts ./
 COPY --from=builder /app/cryptoUtils.ts ./
-COPY --from=builder /app/public ./public
 # Copy config files if any (like .env.example)
 COPY --from=builder /app/.env.example ./
 
