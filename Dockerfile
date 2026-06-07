@@ -31,6 +31,7 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.ts ./
+COPY --from=builder /app/cryptoUtils.ts ./
 COPY --from=builder /app/public ./public
 # Copy config files if any (like .env.example)
 COPY --from=builder /app/.env.example ./
@@ -40,6 +41,13 @@ EXPOSE 3000
 
 # Set environment to production
 ENV NODE_ENV=production
+
+# Create a directory for the database and set permissions
+RUN mkdir -p /app/data && chown node:node /app/data
+ENV DATABASE_PATH=/app/data/dev.sqlite
+
+# Switch to the non-root node user
+USER node
 
 # Start the application using tsx as defined in package.json
 # Note: DATABASE_PATH should be pointed to a volume in docker-compose

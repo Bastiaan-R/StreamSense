@@ -8,13 +8,13 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_PATH=/app/data/cinema_sense.db
-      # You can leave these empty and use the in-app Setup Wizard on first launch
-      - JELLYFIN_URL=${JELLYFIN_URL:-}
-      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
-      - TMDB_READ_ACCESS_TOKEN=${TMDB_READ_ACCESS_TOKEN:-}
-      - SEERR_URL=${SEERR_URL:-}
-      - SEERR_API_KEY=${SEERR_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - JELLYFIN_URL=${JELLYFIN_URL}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      - TMDB_READ_ACCESS_TOKEN=${TMDB_READ_ACCESS_TOKEN}
+      - SEERR_URL=${SEERR_URL}
+      - SEERR_API_KEY=${SEERR_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - ADMIN_USER_IDS=${ADMIN_USER_IDS}
     volumes:
       - ./data:/app/data
     restart: unless-stopped

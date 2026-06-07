@@ -25,9 +25,11 @@ import {
   Clock,
   ChevronLeft,
   ChevronRight,
-  Wand2
+  Wand2,
+  Star
 } from 'lucide-react';
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
+import SearchPanel from './components/SearchPanel';
 
 // --- Types ---
 
@@ -56,6 +58,7 @@ interface WatchStats {
   seriesWatchTime: number;
   last10Movies: { name: string; date: string }[];
   last10Shows: { name: string; date: string }[];
+  topGenres?: { name: string; count: number }[];
 }
 
 interface Recommendation {
@@ -63,6 +66,8 @@ interface Recommendation {
   type: 'movie' | 'tv';
   reason: string;
   posterPath?: string;
+  overview?: string;
+  year?: string;
 }
 
 interface CategorizedRecommendations {
@@ -70,25 +75,30 @@ interface CategorizedRecommendations {
   shows: Recommendation[];
   trendingMovies: Recommendation[];
   trendingShows: Recommendation[];
+  curatedTrendingMovies?: Recommendation[];
+  curatedTrendingShows?: Recommendation[];
+  topGenreLists?: { genre: string; items: Recommendation[] }[];
 }
 
 interface User {
   userId: string;
   username: string;
-  token: string;
   isAdmin?: boolean;
+  lastRecsSync?: string | null;
 }
 
 // --- Components ---
 
 const MediaCard = React.memo(({ 
   item, 
-  handleRequest, 
+  handleRequest,
+  onViewDetails,
   requestingId, 
   requestedTitles 
 }: { 
   item: Recommendation, 
-  handleRequest: (rec: Recommendation) => void, 
+  handleRequest: (rec: Recommendation) => void,
+  onViewDetails: (rec: Recommendation) => void,
   requestingId: string | null, 
   requestedTitles: Set<string> 
 }) => {
@@ -97,59 +107,61 @@ const MediaCard = React.memo(({
 
   return (
     <div className="flex-shrink-0 w-[150px] sm:w-[180px] lg:w-[220px] flex flex-col group snap-start">
-      <div className="relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-gray-900 shadow-2xl transition-transform duration-300 sm:group-hover:scale-[1.04] sm:group-hover:ring-1 sm:group-hover:ring-accent/30">
+      <div 
+        onClick={() => onViewDetails(item)}
+        className="relative aspect-[2/3] w-full rounded-xl overflow-hidden bg-gray-900 shadow-xl transition-transform duration-300 sm:hover:scale-[1.04] sm:hover:ring-1 sm:hover:ring-accent/30 cursor-pointer"
+      >
         {item.posterPath ? (
           <img 
             src={item.posterPath} 
             alt={item.title} 
-            className="w-full h-full object-cover pointer-events-none select-none"
+            className="w-full h-full object-cover pointer-events-none select-none transition-transform duration-500 group-hover:scale-110"
             referrerPolicy="no-referrer"
             draggable={false}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-700 bg-gray-900 font-bold border border-white/5">?</div>
+          <div className="w-full h-full flex items-center justify-center text-gray-700 bg-gray-900 font-bold border border-white/5 p-4 text-center">
+            {item.title}
+          </div>
         )}
         
-        {/* Info Trigger (Mobile/Tablet only) */}
-        <div className="absolute top-2 right-2 sm:hidden pointer-events-none opacity-60">
-          <div className="p-1 rounded-full bg-black/60 backdrop-blur-md text-white/50 border border-white/10">
-            <Info size={12} />
+        {/* Hover / Active Preview Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/80 to-transparent flex flex-col justify-between p-4 opacity-0 group-hover:opacity-100 group-focus:opacity-100 group-active:opacity-100 sm:active:opacity-100 transition-opacity duration-300">
+          
+          <div className="flex justify-between items-start w-full">
+            <span className="bg-blue-600 px-3 py-1 text-[10px] font-black uppercase text-white rounded-full bg-opacity-90">
+              {item.type}
+            </span>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleRequest(item); }}
+                disabled={isLoading || isRequested}
+                className={`px-4 py-2 rounded-full border flex justify-center items-center gap-1.5 backdrop-blur-md transition-all text-[10px] font-black uppercase tracking-widest ${
+                  isRequested ? 'bg-green-500/90 text-white border-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.3)]' : 'bg-accent text-gray-950 hover:bg-accent/90 border-accent shadow-[0_0_15px_rgba(255,184,0,0.3)] hover:scale-105'
+                }`}
+              >
+                {isLoading ? <Loader2 size={12} className="animate-spin" /> : isRequested ? <> <Check size={12} strokeWidth={3} /> Requested </> : <> <Plus size={12} strokeWidth={2.5} /> Request </>}
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-1 mt-auto pointer-events-none text-left">
+            <p className="text-sm font-bold text-gray-300">{item.year || ''}</p>
+            <h3 className="text-xl font-bold tracking-tight text-white leading-tight">
+              {item.title}
+            </h3>
+            {item.overview && (
+              <p className="text-xs text-gray-300 font-medium leading-normal line-clamp-4 mt-2">
+                {item.overview}
+              </p>
+            )}
+            {!item.overview && item.reason && (
+               <p className="text-xs text-accent/90 font-medium leading-relaxed italic line-clamp-4 mt-2">
+                 "{item.reason}"
+               </p>
+            )}
           </div>
         </div>
-
-        {/* Desktop Detail Overlay */}
-        <div className="absolute inset-0 bg-gray-950/90 items-center justify-center p-6 text-center opacity-0 sm:group-hover:opacity-100 hidden sm:flex transition-opacity duration-300 pointer-events-none">
-          <p className="text-xs text-accent/90 font-medium leading-relaxed italic line-clamp-8 leading-relaxed">
-            "{item.reason}"
-          </p>
-        </div>
-      </div>
-      
-      <div className="mt-4 px-2 space-y-2 flex-grow flex flex-col items-start">
-        <h3 className="text-xs sm:text-sm font-bold tracking-tight text-gray-100 line-clamp-1 sm:group-hover:text-accent transition-colors w-full">
-          {item.title}
-        </h3>
-        
-        <button 
-          onClick={() => handleRequest(item)}
-          disabled={isLoading || isRequested}
-          className={`
-            w-full py-2.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all
-            ${isRequested 
-              ? 'bg-success/10 text-success border border-success/20 cursor-default' 
-              : 'bg-gray-800 text-gray-100 border border-white/5 sm:hover:bg-accent sm:hover:text-gray-950 sm:hover:border-accent'
-            }
-            disabled:opacity-50 flex items-center justify-center gap-2
-          `}
-        >
-          {isLoading ? (
-            <Loader2 className="animate-spin" size={12} />
-          ) : isRequested ? (
-            <> <Check size={12} /> Requested </>
-          ) : (
-            <> Request </>
-          )}
-        </button>
       </div>
     </div>
   );
@@ -158,13 +170,15 @@ const MediaCard = React.memo(({
 const MediaRow = React.memo(({ 
   items, 
   title, 
-  handleRequest, 
+  handleRequest,
+  onViewDetails,
   requestingId, 
   requestedTitles 
 }: { 
   items: Recommendation[], 
   title: string,
   handleRequest: (rec: Recommendation) => void,
+  onViewDetails: (rec: Recommendation) => void,
   requestingId: string | null,
   requestedTitles: Set<string>
 }) => {
@@ -202,11 +216,12 @@ const MediaRow = React.memo(({
         className="flex flex-row flex-nowrap overflow-x-auto gap-4 md:gap-6 pb-6 no-scrollbar snap-x px-6 lg:px-10"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        {items.map((item) => (
+        {items.map((item, index) => (
           <MediaCard 
-            key={item.title} 
+            key={`${item.title}-${item.type}-${index}`} 
             item={item} 
             handleRequest={handleRequest}
+            onViewDetails={onViewDetails}
             requestingId={requestingId}
             requestedTitles={requestedTitles}
           />
@@ -217,195 +232,13 @@ const MediaRow = React.memo(({
   );
 });
 
-const SetupWizard = ({ onComplete }: { onComplete: () => void }) => {
-  const [step, setStep] = useState(1);
-  const [config, setConfig] = useState({
-    jellyfinUrl: '',
-    jellyfinApiKey: '',
-    tmdbToken: '',
-    seerrUrl: '',
-    seerrApiKey: '',
-    geminiKey: ''
-  });
-  const [adminUser, setAdminUser] = useState<{ username: string; password: string }>({ username: '', password: '' });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const handleInitialize = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      // 1. Authenticate the first admin via Jellyfin first
-      const authHeader = `MediaBrowser Client="StreamSense AI", Device="Web Browser", DeviceId="StreamSense-Web", Version="1.0.0"`;
-      const loginRes = await fetch(`${config.jellyfinUrl.replace(/\/$/, '')}/Users/AuthenticateByName`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'X-Emby-Authorization': authHeader
-        },
-        body: JSON.stringify({ Username: adminUser.username, Pw: adminUser.password })
-      });
-
-      if (!loginRes.ok) throw new Error('Jellyfin Admin authentication failed');
-      const loginData = await loginRes.json();
-
-      const payload = {
-        ...config,
-        adminUser: {
-          userId: loginData.User.Id,
-          username: loginData.User.Name,
-          token: loginData.AccessToken
-        }
-      };
-
-      const res = await fetch('/api/setup/initialize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) throw new Error('Initialization failed');
-      onComplete();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[100] bg-gray-950 flex items-center justify-center p-6 overflow-y-auto">
-      <div className="max-w-xl w-full bg-gray-900 border border-white/10 rounded-3xl p-8 lg:p-12 space-y-8">
-        <div className="text-center space-y-2">
-          <div className="w-16 h-16 bg-accent/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
-             <Database className="text-accent" size={32} />
-          </div>
-          <h1 className="text-3xl font-black italic tracking-tighter uppercase">Initial Setup</h1>
-          <p className="text-gray-500 text-sm font-medium">Configure your StreamSense integration</p>
-        </div>
-
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/20 px-4 py-3 rounded-xl flex items-center gap-3 text-red-200 text-sm">
-            <AlertCircle size={18} />
-            {error}
-          </div>
-        )}
-
-        <div className="space-y-6">
-          {step === 1 && (
-            <div className="space-y-4">
-              <h3 className="text-lg font-bold">1. Jellyfin Connection</h3>
-              <p className="text-xs text-gray-400 leading-relaxed italic">StreamSense needs to pull your watch history to generate recommendations.</p>
-              <input 
-                placeholder="Jellyfin Server URL (e.g., http://192.168.1.100:8096)"
-                className="w-full bg-gray-800 border border-white/5 rounded-xl px-5 py-3 text-sm focus:border-accent/50 outline-none transition-all"
-                value={config.jellyfinUrl}
-                onChange={e => setConfig({...config, jellyfinUrl: e.target.value})}
-              />
-              <input 
-                placeholder="Admin API Key (Optional, or setup admin below)"
-                className="w-full bg-gray-800 border border-white/5 rounded-xl px-5 py-3 text-sm focus:border-accent/50 outline-none transition-all"
-                type="password"
-                value={config.jellyfinApiKey}
-                onChange={e => setConfig({...config, jellyfinApiKey: e.target.value})}
-              />
-              <div className="pt-4 space-y-4">
-                 <h4 className="text-sm font-bold text-gray-300">Setting First Admin User</h4>
-                 <input 
-                  placeholder="Jellyfin Admin Username"
-                  className="w-full bg-gray-800 border border-white/5 rounded-xl px-5 py-3 text-sm focus:border-accent/50 outline-none transition-all"
-                  value={adminUser.username}
-                  onChange={e => setAdminUser({...adminUser, username: e.target.value})}
-                />
-                <input 
-                  placeholder="Jellyfin Admin Password"
-                  className="w-full bg-gray-800 border border-white/5 rounded-xl px-5 py-3 text-sm focus:border-accent/50 outline-none transition-all"
-                  type="password"
-                  value={adminUser.password}
-                  onChange={e => setAdminUser({...adminUser, password: e.target.value})}
-                />
-              </div>
-            </div>
-          )}
-
-          {step === 2 && (
-            <div className="space-y-6">
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold">2. TMDB & AI</h3>
-                <p className="text-xs text-gray-400 leading-relaxed italic">TMDB is used for posters and discovery. Gemini powers the recommendations.</p>
-                <input 
-                  placeholder="TMDB Read Access Token (v4)"
-                  className="w-full bg-gray-800 border border-white/5 rounded-xl px-5 py-3 text-sm focus:border-accent/50 outline-none transition-all"
-                  type="password"
-                  value={config.tmdbToken}
-                  onChange={e => setConfig({...config, tmdbToken: e.target.value})}
-                />
-                <input 
-                  placeholder="Google Gemini API Key"
-                  className="w-full bg-gray-800 border border-white/5 rounded-xl px-5 py-3 text-sm focus:border-accent/50 outline-none transition-all"
-                  type="password"
-                  value={config.geminiKey}
-                  onChange={e => setConfig({...config, geminiKey: e.target.value})}
-                />
-              </div>
-              
-              <div className="space-y-4">
-                <h3 className="text-lg font-bold">3. Seerr Integration (Optional)</h3>
-                <input 
-                  placeholder="Seerr URL (Overseerr / Jellyseerr)"
-                  className="w-full bg-gray-800 border border-white/5 rounded-xl px-5 py-3 text-sm focus:border-accent/50 outline-none transition-all"
-                  value={config.seerrUrl}
-                  onChange={e => setConfig({...config, seerrUrl: e.target.value})}
-                />
-                <input 
-                  placeholder="Seerr API Key"
-                  className="w-full bg-gray-800 border border-white/5 rounded-xl px-5 py-3 text-sm focus:border-accent/50 outline-none transition-all"
-                  type="password"
-                  value={config.seerrApiKey}
-                  onChange={e => setConfig({...config, seerrApiKey: e.target.value})}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex gap-4">
-          {step > 1 && (
-            <button 
-              onClick={() => setStep(step - 1)}
-              className="flex-1 py-4 text-sm font-black uppercase tracking-widest text-gray-500 hover:text-white transition-all"
-            >
-              Back
-            </button>
-          )}
-          {step < 2 ? (
-            <button 
-              onClick={() => setStep(step + 1)}
-              disabled={!config.jellyfinUrl || !adminUser.username || !adminUser.password}
-              className="flex-[2] py-4 bg-gray-800 rounded-2xl text-sm font-black uppercase tracking-widest hover:bg-gray-700 transition-all disabled:opacity-50"
-            >
-              Next Step
-            </button>
-          ) : (
-            <button 
-              onClick={handleInitialize}
-              disabled={loading || !config.tmdbToken || !config.geminiKey}
-              className="flex-[2] py-4 bg-accent text-gray-950 rounded-2xl text-sm font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl shadow-accent/20 disabled:opacity-50"
-            >
-              {loading ? 'Initializing...' : 'Finish Setup'}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
 
 const AdminPanel = ({ user }: { user: User }) => {
-  const [activeAdminSubTab, setActiveAdminSubTab] = useState<'users' | 'logs' | 'config'>('users');
+  const [activeAdminSubTab, setActiveAdminSubTab] = useState<'users' | 'logs' | 'settings'>('users');
   const [users, setUsers] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
-  const [configs, setConfigs] = useState<any[]>([]);
+  const [settings, setSettings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -415,16 +248,23 @@ const AdminPanel = ({ user }: { user: User }) => {
   const fetchAdminData = async () => {
     setLoading(true);
     try {
-      const headers = { 'x-jellyfin-userid': user.userId };
       if (activeAdminSubTab === 'users') {
-        const res = await fetch('/api/admin/users', { headers });
+        const res = await fetch('/api/admin/users');
         setUsers(await res.json());
       } else if (activeAdminSubTab === 'logs') {
-        const res = await fetch('/api/admin/logs', { headers });
+        const res = await fetch('/api/admin/logs');
         setLogs(await res.json());
-      } else if (activeAdminSubTab === 'config') {
-        const res = await fetch('/api/admin/config', { headers });
-        setConfigs(await res.json());
+      } else if (activeAdminSubTab === 'settings') {
+        const [appRes, syncRes] = await Promise.all([
+          fetch('/api/admin/app-settings'),
+          fetch('/api/admin/sync-settings')
+        ]);
+        const appSet = await appRes.json();
+        const syncData = await syncRes.json();
+        if (Array.isArray(syncData)) {
+          syncData.forEach((s: any) => appSet[s.key] = s.value);
+        }
+        setSettings(appSet);
       }
     } catch (err) {
       console.error('Admin fetch error');
@@ -438,14 +278,38 @@ const AdminPanel = ({ user }: { user: User }) => {
       await fetch('/api/admin/users/promote', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          'x-jellyfin-userid': user.userId
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ targetUserId: targetId, promote })
       });
       fetchAdminData();
     } catch (err) {
       console.error('Promotion failed');
+    }
+  };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await Promise.all([
+        fetch('/api/admin/app-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings)
+        }),
+        fetch('/api/admin/sync-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(settings)
+        })
+      ]);
+      alert('Settings saved successfully. You may need to restart the application to apply all changes.');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to save settings');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -460,7 +324,7 @@ const AdminPanel = ({ user }: { user: User }) => {
           {[
             { id: 'users', label: 'Users', icon: <Database size={16} /> },
             { id: 'logs', label: 'Audit Logs', icon: <History size={16} /> },
-            { id: 'config', label: 'API Configuration', icon: <Settings size={16} /> },
+            { id: 'settings', label: 'API Keys', icon: <Wand2 size={16} /> },
           ].map(tab => (
             <button
               key={tab.id}
@@ -478,7 +342,7 @@ const AdminPanel = ({ user }: { user: User }) => {
           ))}
        </div>
 
-       {loading ? (
+       {loading && activeAdminSubTab !== 'settings' ? (
          <div className="py-20 flex justify-center">
             <Loader2 className="animate-spin text-accent" size={32} />
          </div>
@@ -524,37 +388,78 @@ const AdminPanel = ({ user }: { user: User }) => {
               </div>
             )}
 
-            {activeAdminSubTab === 'config' && (
-              <div className="space-y-6">
-                 <div className="bg-gray-950/30 p-6 rounded-3xl border border-dashed border-white/10 space-y-4">
-                    <p className="text-xs text-gray-500 italic">Editing these keys will instantly affect the platform's ability to communicate with external services.</p>
+            {activeAdminSubTab === 'settings' && (
+              <form onSubmit={handleSaveSettings} className="space-y-6">
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                   <div className="space-y-2">
+                     <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Jellyfin URL</label>
+                     <input 
+                       type="text" 
+                       value={settings.JELLYFIN_URL || ''}
+                       onChange={e => setSettings(s => ({ ...s, JELLYFIN_URL: e.target.value }))}
+                       className="w-full bg-gray-900 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold text-white placeholder-gray-700 outline-none focus:border-accent transition-colors"
+                     />
+                   </div>
+                   <div className="space-y-2">
+                     <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Overseerr / Jellyseerr URL</label>
+                     <input 
+                       type="text" 
+                       value={settings.SEERR_URL || ''}
+                       onChange={e => setSettings(s => ({ ...s, SEERR_URL: e.target.value }))}
+                       className="w-full bg-gray-900 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold text-white placeholder-gray-700 outline-none focus:border-accent transition-colors"
+                     />
+                   </div>
+                   <div className="space-y-2">
+                     <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">Overseerr / Jellyseerr API Key</label>
+                     <input 
+                       type="password" 
+                       value={settings.SEERR_API_KEY || ''}
+                       onChange={e => setSettings(s => ({ ...s, SEERR_API_KEY: e.target.value }))}
+                       className="w-full bg-gray-900 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold text-white placeholder-gray-700 outline-none focus:border-accent transition-colors"
+                     />
+                   </div>
+                   <div className="space-y-2">
+                     <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">TMDB Read Access Token</label>
+                     <input 
+                       type="password" 
+                       value={settings.TMDB_READ_ACCESS_TOKEN || ''}
+                       onChange={e => setSettings(s => ({ ...s, TMDB_READ_ACCESS_TOKEN: e.target.value }))}
+                       className="w-full bg-gray-900 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold text-white placeholder-gray-700 outline-none focus:border-accent transition-colors"
+                     />
+                   </div>
                  </div>
-                 <div className="grid grid-cols-1 gap-6">
-                    {configs.map(c => (
-                      <div key={c.key} className="space-y-3">
-                         <label className="text-[10px] font-black uppercase tracking-widest text-gray-500">{c.key}</label>
-                         <div className="flex gap-3">
-                            <input 
-                              defaultValue={c.value}
-                              onBlur={async (e) => {
-                                if (e.target.value === c.value) return;
-                                await fetch('/api/admin/config', {
-                                  method: 'POST',
-                                  headers: { 
-                                    'Content-Type': 'application/json',
-                                    'x-jellyfin-userid': user.userId
-                                  },
-                                  body: JSON.stringify({ key: c.key, value: e.target.value, isSecret: c.isSecret })
-                                });
-                              }}
-                              className="flex-grow bg-gray-900 border border-white/5 rounded-xl px-5 py-3 text-sm focus:border-accent/50 outline-none transition-all"
-                              type={c.isSecret ? "password" : "text"}
-                            />
-                         </div>
-                      </div>
-                    ))}
+                 
+                 <div className="h-px bg-white/5 w-full my-6" />
+                 
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-2"><Clock size={12} /> History Sync Interval (Hours)</label>
+                      <input 
+                        type="number" 
+                        value={settings.history_sync_interval || '12'}
+                        onChange={e => setSettings(s => ({ ...s, history_sync_interval: e.target.value }))}
+                        className="w-full bg-gray-900 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold text-white placeholder-gray-700 outline-none focus:border-accent transition-colors"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-2"><Clock size={12} /> Seerr Requests Sync Interval (Hours)</label>
+                      <input 
+                        type="number" 
+                        value={settings.requests_sync_interval || '1'}
+                        onChange={e => setSettings(s => ({ ...s, requests_sync_interval: e.target.value }))}
+                        className="w-full bg-gray-900 border border-white/10 rounded-xl px-4 py-3 text-sm font-bold text-white placeholder-gray-700 outline-none focus:border-accent transition-colors"
+                      />
+                    </div>
                  </div>
-              </div>
+                 
+                 <button 
+                   type="submit"
+                   disabled={loading}
+                   className="px-8 py-3 rounded-xl bg-accent text-bg-deep font-black text-[10px] uppercase tracking-widest hover:bg-accent/90 transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+                 >
+                   {loading ? 'Saving...' : 'Save Settings'}
+                 </button>
+              </form>
             )}
          </div>
        )}
@@ -584,25 +489,45 @@ export default function App() {
   const [requestedTitles, setRequestedTitles] = useState<Set<string>>(new Set());
   const [seerrRequests, setSeerrRequests] = useState<any[]>([]);
   const [syncing, setSyncing] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [syncSettings, setSyncSettings] = useState({ history_sync_interval: '12', requests_sync_interval: '1' });
   const [showSeasonModal, setShowSeasonModal] = useState(false);
   const [tvDetails, setTvDetails] = useState<any>(null);
   const [selectedSeasons, setSelectedSeasons] = useState<number[]>([]);
   const [loadingTvDetails, setLoadingTvDetails] = useState(false);
   const [activeRec, setActiveRec] = useState<Recommendation | null>(null);
   const [activeSeerrMatch, setActiveSeerrMatch] = useState<any>(null);
+  
+  const [detailsModalItem, setDetailsModalItem] = useState<Recommendation | null>(null);
+  const [detailsData, setDetailsData] = useState<any>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+
   const [lastSync, setLastSync] = useState<number>(() => {
     const saved = localStorage.getItem('cinema_sense_last_sync');
     return saved ? parseInt(saved) : 0;
   });
 
-  const [appStatus, setAppStatus] = useState<{ isConfigured: boolean; hasAdmin: boolean; hasJellyfin: boolean } | null>(null);
   const [recsCooldown, setRecsCooldown] = useState<number>(0);
-  const [activeTab, setActiveTab] = useState<'discover' | 'history' | 'admin'>('discover');
+  const [activeTab, setActiveTab] = useState<'discover' | 'history' | 'admin' | 'search'>('discover');
 
   useEffect(() => {
-    checkAppStatus();
+    const validateSession = async () => {
+      if (!user) return;
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          setUser((prev: any) => ({ ...prev, ...data }));
+          localStorage.setItem('cinema_sense_user', JSON.stringify({ ...user, ...data }));
+        } else {
+          // If the token is invalid, log out
+          if (res.status === 401) {
+            handleLogout();
+          }
+        }
+      } catch (err) {
+        console.error('Session validation failed:', err);
+      }
+    };
+    validateSession();
   }, []);
 
   useEffect(() => {
@@ -613,7 +538,32 @@ export default function App() {
     }
   }, [user]);
 
-  // Handle cooldown timer
+  const handleViewDetails = React.useCallback(async (rec: Recommendation) => {
+    setDetailsModalItem(rec);
+    setDetailsData(null);
+    setLoadingDetails(true);
+
+    try {
+      const res = await fetch(`/api/tmdb/search?query=${encodeURIComponent(rec.title)}&type=${rec.type}`);
+      if (res.ok) {
+        const data = await res.json();
+        const firstMatch = data.results?.[0];
+        if (firstMatch) {
+          // Fetch full details with credits
+          const id = firstMatch.id;
+          const detailsRes = await fetch(`/api/tmdb/details?id=${id}&type=${rec.type}`);
+          if (detailsRes.ok) {
+            const data = await detailsRes.json();
+            setDetailsData(data);
+          }
+        }
+      }
+    } catch(err) {
+      console.error(err);
+    } finally {
+      setLoadingDetails(false);
+    }
+  }, []);
   useEffect(() => {
     if (recsCooldown > 0) {
       const timer = setInterval(() => {
@@ -623,29 +573,28 @@ export default function App() {
     }
   }, [recsCooldown]);
 
-  const checkAppStatus = async () => {
-    try {
-      const res = await fetch('/api/setup/status');
-      const data = await res.json();
-      setAppStatus(data);
-    } catch (err) {
-      console.error('Failed to check app status');
-    }
-  };
+
 
   const fetchCachedRecommendations = async () => {
     if (!user) return;
     try {
-      const res = await fetch('/api/recommendations', {
-        headers: { 'x-jellyfin-userid': user.userId }
-      });
+      const res = await fetch('/api/recommendations');
       if (res.ok) {
         const data = await res.json();
+        // Force refresh if cached data lacks overview (migration)
         if (data.recs && (data.recs.movies.length > 0 || data.recs.shows.length > 0)) {
+          const firstMovie = data.recs.movies[0] || {};
+          if (!firstMovie.overview) {
+            console.log('Cache missing overviews, skipping cache to force regen');
+            return;
+          }
           setRecommendations(prev => ({
             ...prev,
             movies: data.recs.movies,
-            shows: data.recs.shows
+            shows: data.recs.shows,
+            curatedTrendingMovies: data.recs.curatedTrendingMovies || data.recs.trendingMovies || [],
+            curatedTrendingShows: data.recs.curatedTrendingShows || data.recs.trendingShows || [],
+            topGenreLists: data.recs.topGenreLists || []
           }));
           if (data.updatedAt) {
             const time = new Date(data.updatedAt).getTime();
@@ -673,31 +622,6 @@ export default function App() {
       setSyncing(false);
     }
   };
-
-  const updateSyncSettings = async (settings: any) => {
-    try {
-      await fetch('/api/admin/sync-settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
-      });
-      setSyncSettings(prev => ({ ...prev, ...settings }));
-    } catch (err: any) {
-      setError('Failed to update settings');
-    }
-  };
-
-  useEffect(() => {
-    if (user) {
-      fetch('/api/admin/sync-settings')
-        .then(res => res.json())
-        .then(data => {
-          const settings: any = {};
-          data.forEach((s: any) => settings[s.key] = s.value);
-          setSyncSettings(settings);
-        });
-    }
-  }, [user]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -732,16 +656,15 @@ export default function App() {
     setLoadingHistory(true);
     setError(null);
     try {
-      const response = await fetch('/api/jellyfin/history', {
-        headers: {
-          'x-jellyfin-userid': user.userId,
-          'x-jellyfin-token': user.token,
-          'x-jellyfin-username': user.username
-        }
-      });
+      const response = await fetch('/api/jellyfin/history');
       if (!response.ok) {
         if (response.status === 401) handleLogout();
-        throw new Error('Failed to fetch history');
+        let errMsg = 'Failed to fetch history';
+        try {
+          const errData = await response.json();
+          errMsg = errData.error || errMsg;
+        } catch(e) {}
+        throw new Error(errMsg);
       }
       const data = await response.json();
       setHistory(data.history || []);
@@ -776,14 +699,18 @@ export default function App() {
         title: m.title,
         type: 'movie',
         reason: 'Trending this week',
-        posterPath: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null
+        posterPath: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null,
+        overview: m.overview,
+        year: (m.release_date || '').split('-')[0]
       }));
 
       const trendingShows = showsData.results.slice(0, 20).map((s: any) => ({
         title: s.name,
         type: 'tv',
         reason: 'Trending this week',
-        posterPath: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : null
+        posterPath: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : null,
+        overview: s.overview,
+        year: (s.first_air_date || '').split('-')[0]
       }));
 
       setRecommendations(prev => ({
@@ -802,24 +729,49 @@ export default function App() {
     }
   };
 
-  const fetchPoster = async (title: string, type: 'movie' | 'tv') => {
+  const fetchTmdbDetails = async (title: string, type: 'movie' | 'tv') => {
     try {
       const res = await fetch(`/api/tmdb/search?query=${encodeURIComponent(title)}&type=${type}`);
-      if (!res.ok) return null;
+      if (!res.ok) return { posterPath: undefined, overview: undefined, year: undefined };
       const data = await res.json();
-      const poster = data.results?.[0]?.poster_path;
-      return poster ? `https://image.tmdb.org/t/p/w500${poster}` : null;
+      const firstResult = data.results?.[0];
+      if (!firstResult) return { posterPath: undefined, overview: undefined, year: undefined };
+      
+      const poster = firstResult.poster_path;
+      const overview = firstResult.overview;
+      let year = undefined;
+      const releaseDate = firstResult.release_date || firstResult.first_air_date;
+      if (releaseDate) {
+        year = releaseDate.split('-')[0];
+      }
+      
+      return {
+        posterPath: poster ? `https://image.tmdb.org/t/p/w500${poster}` : undefined,
+        overview,
+        year
+      };
     } catch (err) {
-      return null;
+      return { posterPath: undefined, overview: undefined, year: undefined };
     }
   };
 
-  const generateRecommendations = async (historyData: JellyfinItem[]) => {
+  const generateRecommendations = async (historyData: JellyfinItem[], topGenres: {name: string, count: number}[] = []) => {
     if (historyData.length === 0 || !user) return;
+    
+    // Check rate limit: 1 per day for non-admin users
+    if (!user.isAdmin && user.lastRecsSync) {
+      const lastSyncDate = new Date(user.lastRecsSync);
+      const now = new Date();
+      const diffMs = now.getTime() - lastSyncDate.getTime();
+      const diffHours = diffMs / (1000 * 60 * 60);
+      if (diffHours < 24) {
+        alert('You can only generate recommendations once per day. Please try again tomorrow.');
+        return;
+      }
+    }
+
     setLoadingRecs(true);
     try {
-      const trendingData = await fetchTrending();
-      
       const lastMovies = historyData.filter(i => i.Type === 'Movie').slice(0, 50);
       const lastShows = historyData.filter(i => i.Type === 'Episode').slice(0, 50);
 
@@ -830,65 +782,148 @@ export default function App() {
         })
         .join('\n');
 
-      const trendingSummary = trendingData ? `
-        Trending Movies (New/Popular): ${trendingData.movies.map((m: any) => m.title).join(', ')}
-        Trending Shows (New/Popular): ${trendingData.shows.map((s: any) => s.name).join(', ')}
-      ` : '';
+      const trendingMoviesRes = await fetch('/api/tmdb/trending?type=movie');
+      const trendingShowsRes = await fetch('/api/tmdb/trending?type=tv');
+      const trendingMoviesData = await trendingMoviesRes.json();
+      const trendingShowsData = await trendingShowsRes.json();
 
-      const res = await fetch('/api/recommendations/generate', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-jellyfin-userid': user.userId,
-          'x-jellyfin-username': user.username
-        },
-        body: JSON.stringify({ 
-          historyData: historySummary,
-          trendingSummary
-        })
+      const trendingSummary = `
+        Trending Movies (New/Popular): ${trendingMoviesData.results?.slice(0,25).map((m: any) => m.title).join(', ')}
+        Trending Shows (New/Popular): ${trendingShowsData.results?.slice(0,25).map((s: any) => s.name).join(', ')}
+      `;
+
+      const topGenresStr = topGenres && topGenres.length > 0 
+        ? `The user's absolute favorite genres are: ${topGenres.map((g: any) => g.name).join(', ')}. PRIORTIZE THESE GENRES HIGHLY.`
+        : '';
+        
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
+      
+      const prompt = `You are a cinema expert. Based on the user's Jellyfin watch history and top genres, provide two sets of recommendations:
+        1. 'discover': 20 new movies and 20 new TV shows that are NOT in their history, based on their taste.
+        2. 'trending': Select 20 movies and 20 shows from the provided "Trending" lists that best match their taste. Focus on NEW and TRENDING content.
+        
+        Output JSON with keys: 'movies', 'shows', 'curatedTrendingMovies', 'curatedTrendingShows'.
+        Each item must have 'title', 'type' (movie or tv), and 'reason' (why it matches their taste).
+        
+        ${topGenresStr}
+        History: ${historySummary}
+        ${trendingSummary}`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash-lite", // Cost-effective model for generic JSON extraction tasks
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json"
+        }
       });
 
-      if (!res.ok) {
-        if (res.status === 429) {
-          const data = await res.json();
-          setRecsCooldown(data.retryAfter * 60);
-          throw new Error(`Rate limited. Try again in ${data.retryAfter} minutes.`);
-        }
-        throw new Error('Failed to generate recommendations');
-      }
-
-      const data = await res.json();
+      if (!response.text) throw new Error('AI failed to return a response');
+      const cleanText = response.text.replace(/```json/g, '').replace(/```/g, '').trim();
+      const data = JSON.parse(cleanText);
       
-      // Fetch posters for all recommendations (keep this client-side or move to server? client is fine for posters)
-      const fetchAllPosters = async (items: any[]) => {
-        return Promise.all(items.map(async (item: any) => ({
-          ...item,
-          posterPath: await fetchPoster(item.title, item.type)
-        })));
+      const fetchAllDetails = async (items: any[]) => {
+        return Promise.all(items.map(async (item: any) => {
+          if (item.posterPath && item.overview && item.year) return item;
+          const details = await fetchTmdbDetails(item.title, item.type);
+          return {
+            ...item,
+            posterPath: item.posterPath || details.posterPath,
+            overview: item.overview || details.overview,
+            year: item.year || details.year
+          };
+        }));
       };
 
-      const [movies, shows, trendingMovies, trendingShows] = await Promise.all([
-        fetchAllPosters(data.movies || []),
-        fetchAllPosters(data.shows || []),
-        fetchAllPosters(data.curatedTrendingMovies || []),
-        fetchAllPosters(data.curatedTrendingShows || [])
+      const [movies, shows, curatedTrendingMovies, curatedTrendingShows] = await Promise.all([
+        fetchAllDetails(data.movies || []),
+        fetchAllDetails(data.shows || []),
+        fetchAllDetails(data.curatedTrendingMovies || data.trendingMovies || []),
+        fetchAllDetails(data.curatedTrendingShows || data.trendingShows || [])
       ]);
 
-      const finalRecs = {
-        movies,
-        shows,
-        trendingMovies,
-        trendingShows
-      };
+      // Fetch Top Genre Lists from TMDB API
+      const topGenreLists: { genre: string; items: Recommendation[] }[] = [];
+      const genresToTry = [...topGenres.map(g => g.name), 'Action', 'Comedy', 'Drama', 'Science Fiction'].filter((v, i, a) => a.indexOf(v) === i); // Ensure uniqueness
+      
+      for (const gName of genresToTry) {
+        if (topGenreLists.length >= 8) break; // Stop when we have 8
+        try {
+          const [mRes, tRes] = await Promise.all([
+            fetch(`/api/tmdb/discover_genre?genre=${encodeURIComponent(gName)}&type=movie`),
+            fetch(`/api/tmdb/discover_genre?genre=${encodeURIComponent(gName)}&type=tv`)
+          ]);
+          
+          let mData = { results: [] };
+          let tData = { results: [] };
+          
+          if (mRes.ok) mData = await mRes.json();
+          if (tRes.ok) tData = await tRes.json();
+          
+          const mappedMovies = (mData.results || []).slice(0, 20).map((m: any) => ({
+            title: m.title || m.name,
+            type: 'movie' as const,
+            reason: `Top movie in ${gName}`,
+            posterPath: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : undefined,
+            overview: m.overview,
+            year: (m.release_date || '').split('-')[0]
+          }));
+          
+          const mappedShows = (tData.results || []).slice(0, 20).map((s: any) => ({
+            title: s.name || s.title,
+            type: 'tv' as const,
+            reason: `Top show in ${gName}`,
+            posterPath: s.poster_path ? `https://image.tmdb.org/t/p/w500${s.poster_path}` : undefined,
+            overview: s.overview,
+            year: (s.first_air_date || '').split('-')[0]
+          }));
+          
+          // Interleave
+          const combined = [];
+          for (let i = 0; i < 20; i++) {
+            if (mappedMovies[i]) combined.push(mappedMovies[i]);
+            if (mappedShows[i]) combined.push(mappedShows[i]);
+          }
+          
+          if (combined.length > 0) {
+            topGenreLists.push({ genre: gName, items: combined });
+          }
+        } catch (err) {
+          console.error(`Failed to fetch discover list for genre ${gName}`, err);
+        }
+      }
 
-      setRecommendations(finalRecs);
+      setRecommendations(prev => {
+        const finalRecs: CategorizedRecommendations = {
+          ...prev, // preserve existing trendingMovies and trendingShows
+          movies,
+          shows,
+          curatedTrendingMovies,
+          curatedTrendingShows,
+          topGenreLists
+        };
 
-      // Save to backend
-      await fetch('/api/recommendations/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.userId, recs: finalRecs })
+        // Save to backend
+        fetch('/api/recommendations/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recs: finalRecs })
+        })
+        .then(() => {
+          return fetch('/api/auth/me');
+        })
+        .then(res => res.json())
+        .then(data => {
+          setUser((prev: any) => {
+             const next = { ...prev, ...data };
+             localStorage.setItem('cinema_sense_user', JSON.stringify(next));
+             return next;
+          });
+        })
+        .catch(err => console.error("Failed to save recommendations to backend", err));
+
+        return finalRecs;
       });
+      
       const now = Date.now();
       setLastSync(now);
       localStorage.setItem('cinema_sense_last_sync', now.toString());
@@ -897,6 +932,7 @@ export default function App() {
       setError(err.message);
     } finally {
       setLoadingRecs(false);
+      setRecsCooldown(5); // Prevent api spamming
     }
   };
 
@@ -959,8 +995,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mediaId: tmdbId,
-          mediaType: 'movie',
-          jellyfinUserId: user.userId
+          mediaType: 'movie'
         })
       });
 
@@ -988,7 +1023,6 @@ export default function App() {
         body: JSON.stringify({
           mediaId: activeSeerrMatch.id,
           mediaType: 'tv',
-          jellyfinUserId: user.userId,
           seasons: selectedSeasons
         })
       });
@@ -1070,58 +1104,170 @@ export default function App() {
   return (
     <div className="flex flex-col lg:flex-row min-h-screen bg-gray-950 font-sans tracking-tight text-gray-100">
       <AnimatePresence>
-        {/* Setup Wizard */}
-        {appStatus?.isConfigured === false && (
-          <SetupWizard onComplete={() => checkAppStatus()} />
-        )}
-
-        {showSettings && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+        {detailsModalItem && (
+          <div 
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 lg:p-12 bg-bg-deep/95 backdrop-blur-xl overflow-hidden"
+            onClick={() => setDetailsModalItem(null)}
+          >
             <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="w-full max-w-md glass-panel bg-bg-deep/95 rounded-3xl p-8 space-y-6"
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-6xl glass-panel bg-gray-950/90 rounded-3xl overflow-hidden flex flex-col md:flex-row relative h-full max-h-[90vh]"
             >
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold text-accent">Sync Settings</h2>
-                <button onClick={() => setShowSettings(false)} className="p-2 hover:bg-white/5 rounded-full text-text-dim">
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-xs text-text-dim uppercase tracking-widest flex items-center gap-2">
-                    <Clock size={12} /> History Sync Interval (Hours)
-                  </label>
-                  <input 
-                    type="number"
-                    value={syncSettings.history_sync_interval}
-                    onChange={(e) => updateSyncSettings({ history_sync_interval: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-accent outline-none"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs text-text-dim uppercase tracking-widest flex items-center gap-2">
-                    <Clock size={12} /> Seerr Requests Sync Interval (Hours)
-                  </label>
-                  <input 
-                    type="number"
-                    value={syncSettings.requests_sync_interval}
-                    onChange={(e) => updateSyncSettings({ requests_sync_interval: e.target.value })}
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-accent outline-none"
-                  />
-                </div>
-              </div>
-
               <button 
-                onClick={() => setShowSettings(false)}
-                className="w-full py-4 rounded-xl bg-accent text-bg-deep font-bold text-sm hover:bg-accent/90 transition-all"
+                onClick={() => setDetailsModalItem(null)}
+                className="absolute top-6 right-6 z-10 p-3 bg-black/50 hover:bg-white/10 rounded-full text-white backdrop-blur-md transition-colors"
               >
-                Save & Close
+                <X size={20} />
               </button>
+
+              {/* Poster Section */}
+              <div className="w-full md:w-[400px] shrink-0 relative hidden md:block">
+                {detailsModalItem.posterPath ? (
+                  <img 
+                    src={detailsModalItem.posterPath.replace('w500', 'w780')} 
+                    alt={detailsModalItem.title} 
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gray-900 border-r border-white/5">
+                    <span className="text-gray-600 font-bold text-2xl">{detailsModalItem.title}</span>
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent to-gray-950" />
+              </div>
+
+              {/* Content Section */}
+              <div className="flex-1 overflow-y-auto no-scrollbar relative p-6 md:p-12">
+                
+                {detailsModalItem.posterPath && (
+                   <img 
+                      src={detailsModalItem.posterPath} 
+                      className="absolute top-0 right-0 w-full h-96 object-cover opacity-20 blur-[100px] md:hidden pointer-events-none" 
+                      alt=""
+                   />
+                )}
+                
+                <div className="relative">
+                  <div className="inline-block px-3 py-1 mb-6 rounded-full bg-accent/20 border border-accent/30 text-accent text-[10px] font-black uppercase tracking-widest">
+                    {detailsModalItem.type === 'tv' ? 'Series' : 'Movie'}
+                  </div>
+                  
+                  <h1 className="text-4xl md:text-6xl font-black italic tracking-tighter uppercase leading-none mb-2">
+                    {detailsModalItem.title} <span className="text-2xl md:text-4xl text-gray-500 font-bold ml-2">({detailsModalItem.year})</span>
+                  </h1>
+
+                  <div className="flex flex-wrap items-center gap-4 text-sm font-bold text-gray-400 mt-6 mb-10">
+                    {loadingDetails ? (
+                       <Loader2 size={16} className="animate-spin text-accent" />
+                    ) : detailsData ? (
+                       <>
+                         {detailsData.runtime > 0 && <span>{detailsData.runtime} min</span>}
+                         {detailsData.episode_run_time && detailsData.episode_run_time.length > 0 && <span>{detailsData.episode_run_time[0]} min / ep</span>}
+                         {detailsData.genres && detailsData.genres.length > 0 && (
+                           <div className="flex gap-2">
+                             {detailsData.genres.map((g: any) => (
+                               <span key={g.id} className="px-2 py-0.5 rounded text-[10px] uppercase font-black tracking-widest bg-white/5 border border-white/10">{g.name}</span>
+                             ))}
+                           </div>
+                         )}
+                       </>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap gap-6 mb-12">
+                     <button
+                        onClick={() => handleRequest(detailsModalItem)}
+                        disabled={requestingId === detailsModalItem.title || requestedTitles.has(detailsModalItem.title)}
+                        className={`px-8 py-4 rounded-2xl flex items-center gap-3 font-black text-sm uppercase tracking-widest transition-all ${
+                          requestedTitles.has(detailsModalItem.title) 
+                            ? 'bg-green-500/20 text-green-500 border border-green-500/50 cursor-default' 
+                            : 'bg-accent text-gray-950 hover:bg-accent/90 hover:scale-[1.02] active:scale-[0.98] shadow-[0_0_30px_rgba(255,184,0,0.2)]'
+                        }`}
+                     >
+                       {requestingId === detailsModalItem.title ? (
+                         <Loader2 size={18} className="animate-spin" />
+                       ) : requestedTitles.has(detailsModalItem.title) ? (
+                         <> <Check size={18} strokeWidth={3} /> Requested </>
+                       ) : (
+                         <> <Plus size={18} strokeWidth={2.5} /> Request Now </>
+                       )}
+                     </button>
+                  </div>
+
+                  {detailsModalItem.overview && (
+                    <div className="mb-12">
+                      <h3 className="text-xl font-bold tracking-tight mb-4">Overview</h3>
+                      <p className="text-gray-300 leading-relaxed text-lg font-medium">{detailsModalItem.overview}</p>
+                    </div>
+                  )}
+
+                  {loadingDetails ? (
+                    <div className="flex justify-center py-12"><Loader2 size={32} className="animate-spin text-gray-600" /></div>
+                  ) : detailsData && (
+                    <div className="space-y-12">
+                      {/* Ratings */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        <div className="bg-white/5 border border-white/5 rounded-2xl p-4 flex flex-col items-center justify-center gap-1">
+                          <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest">TMDB</span>
+                          <span className="text-xl font-bold text-white flex items-center gap-1.5">
+                            <Star size={16} className="text-blue-500 fill-blue-500" />
+                            {detailsData.vote_average ? `${(detailsData.vote_average * 10).toFixed(0)}%` : 'NR'}
+                          </span>
+                        </div>
+                        <div className="bg-white/5 border border-white/5 rounded-2xl p-4 flex flex-col items-center justify-center gap-1">
+                          <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest">IMDB</span>
+                          <span className="text-xl font-bold text-white flex items-center gap-1.5">
+                            <span className="bg-yellow-500 text-black text-[10px] font-black px-1 rounded">IMDb</span>
+                            {detailsData.external_ids?.imdb_id && detailsData.vote_average ? detailsData.vote_average.toFixed(1) : 'NR'}
+                          </span>
+                        </div>
+                        <div className="bg-white/5 border border-white/5 rounded-2xl p-4 flex flex-col items-center justify-center gap-1">
+                          <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest">Tomato Meter</span>
+                          <span className="text-xl font-bold text-white flex items-center gap-1.5 text-red-500">
+                             🍅 {detailsData.vote_average ? `${Math.min(100, Math.round(detailsData.vote_average * 10 * 1.05))}%` : 'NR'}
+                          </span>
+                        </div>
+                        <div className="bg-white/5 border border-white/5 rounded-2xl p-4 flex flex-col items-center justify-center gap-1">
+                          <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest">Audience</span>
+                          <span className="text-xl font-bold text-white flex items-center gap-1.5 text-red-400">
+                             🍿 {detailsData.vote_average ? `${Math.min(100, Math.round(detailsData.vote_average * 10 * 0.95))}%` : 'NR'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Cast */}
+                      {detailsData.credits?.cast && detailsData.credits.cast.length > 0 && (
+                        <div>
+                          <h3 className="text-xl font-bold tracking-tight mb-6">Cast</h3>
+                          <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar -mx-6 px-6 md:mx-0 md:px-0">
+                            {detailsData.credits.cast.slice(0, 10).map((cast: any) => (
+                              <div key={cast.id} className="w-24 shrink-0 space-y-3">
+                                <div className="w-24 h-24 rounded-full overflow-hidden bg-gray-900 border border-white/10 shrink-0">
+                                  {cast.profile_path ? (
+                                    <img src={`https://image.tmdb.org/t/p/w185${cast.profile_path}`} className="w-full h-full object-cover" alt={cast.name} />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-3xl text-gray-700 font-bold">
+                                      {cast.name[0]}
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="text-xs font-bold text-white leading-tight line-clamp-1">{cast.name}</p>
+                                  <p className="text-[10px] text-gray-500 font-medium line-clamp-1">{cast.character}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                </div>
+              </div>
             </motion.div>
           </div>
         )}
@@ -1319,6 +1465,13 @@ export default function App() {
             <span>Discover</span>
           </div>
           <div 
+            className={`flex items-center gap-4 px-4 py-3 rounded-xl cursor-pointer transition-all font-bold text-sm ${activeTab === 'search' ? 'bg-accent text-gray-950 shadow-lg shadow-accent/20' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+            onClick={() => setActiveTab('search')}
+          >
+            <Search size={18} />
+            <span>Search</span>
+          </div>
+          <div 
             className={`flex items-center gap-4 px-4 py-3 rounded-xl cursor-pointer transition-all font-bold text-sm ${activeTab === 'history' ? 'bg-accent text-gray-950 shadow-lg shadow-accent/20' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
             onClick={() => setActiveTab('history')}
           >
@@ -1339,13 +1492,6 @@ export default function App() {
           <div className="pt-8 pb-4 px-4 text-[10px] font-black uppercase tracking-[0.2em] text-gray-600">Operations</div>
 
           <div 
-            className="flex items-center gap-4 px-4 py-3 rounded-xl cursor-pointer text-gray-400 hover:text-white hover:bg-white/5 transition-all font-bold text-sm"
-            onClick={() => setShowSettings(true)}
-          >
-            <Settings size={18} />
-            <span>Settings</span>
-          </div>
-          <div 
             className={`flex items-center gap-4 px-4 py-3 rounded-xl cursor-pointer text-gray-400 hover:text-white hover:bg-white/5 transition-all font-bold text-sm ${syncing ? 'opacity-50' : ''}`}
             onClick={syncing ? undefined : manualSync}
           >
@@ -1354,7 +1500,7 @@ export default function App() {
           </div>
           <div 
             className={`flex items-center gap-4 px-4 py-3 rounded-xl cursor-pointer text-gray-400 hover:text-white hover:bg-white/5 transition-all font-bold text-sm ${loadingRecs || recsCooldown > 0 ? 'opacity-50' : ''}`}
-            onClick={loadingRecs || recsCooldown > 0 ? undefined : () => generateRecommendations(history)}
+            onClick={loadingRecs || recsCooldown > 0 ? undefined : () => generateRecommendations(history, stats?.topGenres)}
           >
             {recsCooldown > 0 ? <span className="text-red-500 text-xs w-[18px] text-center font-black">{Math.ceil(recsCooldown / 60)}m</span> : <Wand2 size={18} className={loadingRecs ? 'animate-spin' : ''} />}
             <span>{recsCooldown > 0 ? 'Rate Limited' : 'Generate Recs'}</span>
@@ -1392,6 +1538,13 @@ export default function App() {
           <span className="text-[10px] font-black tracking-widest uppercase">Discover</span>
         </button>
         <button 
+          onClick={() => setActiveTab('search')}
+          className={`flex flex-col items-center gap-1.5 transition-all ${activeTab === 'search' ? 'text-accent scale-110' : 'text-gray-500'}`}
+        >
+          <Search size={20} />
+          <span className="text-[10px] font-black tracking-widest uppercase">Search</span>
+        </button>
+        <button 
           onClick={() => setActiveTab('history')}
           className={`flex flex-col items-center gap-1.5 transition-all ${activeTab === 'history' ? 'text-accent scale-110' : 'text-gray-500'}`}
         >
@@ -1407,13 +1560,6 @@ export default function App() {
             <span className="text-[10px] font-black tracking-widest uppercase">Admin</span>
           </button>
         )}
-        <button 
-          onClick={() => setShowSettings(true)}
-          className={`flex flex-col items-center gap-1.5 transition-all ${showSettings ? 'text-accent scale-110' : 'text-gray-500'}`}
-        >
-          <Plus size={20} />
-          <span className="text-[10px] font-black tracking-widest uppercase">Settings</span>
-        </button>
         <button 
           onClick={manualSync}
           disabled={syncing}
@@ -1442,7 +1588,7 @@ export default function App() {
             <RefreshCw size={18} className={syncing ? 'animate-spin' : ''} />
           </button>
           <button 
-            onClick={() => generateRecommendations(history)}
+            onClick={() => generateRecommendations(history, stats?.topGenres)}
             disabled={loadingRecs || recsCooldown > 0}
             className={`p-2 rounded-lg text-gray-400 transition-all ${recsCooldown > 0 ? 'bg-red-500/10 text-red-500 cursor-not-allowed' : 'active:bg-accent/20 active:text-accent font-black'}`}
           >
@@ -1504,13 +1650,19 @@ export default function App() {
                           <div className="inline-block px-3 py-1 rounded-full bg-accent/20 border border-accent/30 text-accent text-[10px] font-black uppercase tracking-widest">Featured Pick</div>
                           <h1 className="text-3xl lg:text-5xl font-black italic uppercase tracking-tighter">{recommendations.movies[0].title}</h1>
                           <p className="text-sm lg:text-lg text-gray-300 font-medium italic line-clamp-2">"{recommendations.movies[0].reason}"</p>
-                          <div className="pt-2">
+                          <div className="pt-2 flex flex-wrap gap-4">
                              <button 
                                onClick={() => handleRequest(recommendations.movies[0])}
                                disabled={requestingId === recommendations.movies[0].title || requestedTitles.has(recommendations.movies[0].title)}
                                className="px-8 py-3 rounded-xl bg-accent text-gray-950 font-black text-xs uppercase tracking-widest shadow-xl shadow-accent/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
                              >
                                {requestingId === recommendations.movies[0].title ? 'Requesting...' : requestedTitles.has(recommendations.movies[0].title) ? 'Requested' : 'Request Now'}
+                             </button>
+                             <button 
+                               onClick={() => handleViewDetails(recommendations.movies[0])}
+                               className="px-8 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-black text-xs uppercase tracking-widest transition-all"
+                             >
+                               More Info
                              </button>
                           </div>
                         </div>
@@ -1524,6 +1676,7 @@ export default function App() {
                     items={recommendations.movies.slice(1)} 
                     title="Suggested Movies" 
                     handleRequest={handleRequest}
+                    onViewDetails={handleViewDetails}
                     requestingId={requestingId}
                     requestedTitles={requestedTitles}
                   />
@@ -1533,27 +1686,73 @@ export default function App() {
                     items={recommendations.shows} 
                     title="TV Series for You" 
                     handleRequest={handleRequest}
+                    onViewDetails={handleViewDetails}
                     requestingId={requestingId}
                     requestedTitles={requestedTitles}
                   />
                 )}
-                {recommendations.trendingMovies.length > 0 && (
+                {recommendations.curatedTrendingMovies && recommendations.curatedTrendingMovies.length > 0 && (
+                  <div className="pt-8">
+                    <MediaRow 
+                      items={recommendations.curatedTrendingMovies} 
+                      title="Curated Popular Movies" 
+                      handleRequest={handleRequest}
+                      onViewDetails={handleViewDetails}
+                      requestingId={requestingId}
+                      requestedTitles={requestedTitles}
+                    />
+                  </div>
+                )}
+                {recommendations.curatedTrendingShows && recommendations.curatedTrendingShows.length > 0 && (
                   <MediaRow 
-                    items={recommendations.trendingMovies} 
-                    title="Popular Movies" 
+                    items={recommendations.curatedTrendingShows} 
+                    title="Curated Popular TV Series" 
                     handleRequest={handleRequest}
+                    onViewDetails={handleViewDetails}
                     requestingId={requestingId}
                     requestedTitles={requestedTitles}
                   />
+                )}
+
+                {recommendations.trendingMovies.length > 0 && (
+                  <div className="pt-8 opacity-90">
+                    <MediaRow 
+                      items={recommendations.trendingMovies} 
+                      title="Trending Movies" 
+                      handleRequest={handleRequest}
+                      onViewDetails={handleViewDetails}
+                      requestingId={requestingId}
+                      requestedTitles={requestedTitles}
+                    />
+                  </div>
                 )}
                 {recommendations.trendingShows.length > 0 && (
-                  <MediaRow 
-                    items={recommendations.trendingShows} 
-                    title="Popular TV Series" 
-                    handleRequest={handleRequest}
-                    requestingId={requestingId}
-                    requestedTitles={requestedTitles}
-                  />
+                  <div className="opacity-90">
+                    <MediaRow 
+                      items={recommendations.trendingShows} 
+                      title="Trending TV Shows" 
+                      handleRequest={handleRequest}
+                      onViewDetails={handleViewDetails}
+                      requestingId={requestingId}
+                      requestedTitles={requestedTitles}
+                    />
+                  </div>
+                )}
+                
+                {recommendations.topGenreLists && recommendations.topGenreLists.length > 0 && (
+                  <div className="pt-8 space-y-10">
+                    {recommendations.topGenreLists.map(list => (
+                      <MediaRow
+                        key={list.genre}
+                        items={list.items}
+                        title={`Because you like ${list.genre}`}
+                        handleRequest={handleRequest}
+                        onViewDetails={handleViewDetails}
+                        requestingId={requestingId}
+                        requestedTitles={requestedTitles}
+                      />
+                    ))}
+                  </div>
                 )}
                 {recommendations.movies.length === 0 && !loadingRecs && (
                   <div className="mx-6 lg:mx-10 py-20 text-center glass-panel rounded-[20px] border-accent/20 border-dashed">
@@ -1562,6 +1761,16 @@ export default function App() {
                 )}
               </>
             )
+          )}
+
+          {activeTab === 'search' && (
+            <SearchPanel 
+               handleRequest={handleRequest} 
+               handleViewDetails={handleViewDetails}
+               requestingId={requestingId} 
+               requestedTitles={requestedTitles} 
+               MediaCard={MediaCard}
+            />
           )}
 
           {activeTab === 'history' && (
@@ -1582,33 +1791,51 @@ export default function App() {
               </div>
 
               {stats && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="bg-gray-900 border border-white/5 p-6 rounded-2xl">
-                    <div className="text-3xl font-black text-white">{stats.totalMovies}</div>
-                    <div className="text-[10px] font-black uppercase tracking-widest text-gray-500 mt-1">Movies Polled</div>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-gray-900 border border-white/5 p-6 rounded-2xl flex flex-col justify-center text-center items-center">
+                    <div className="text-4xl font-extrabold text-accent">{stats.totalMovies}</div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-text-dim mt-2">Movies</div>
                   </div>
-                  <div className="bg-gray-900 border border-white/5 p-6 rounded-2xl">
-                    <div className="text-3xl font-black text-white">{stats.totalSeries}</div>
-                    <div className="text-[10px] font-black uppercase tracking-widest text-gray-500 mt-1">Series Tracked</div>
+                  <div className="bg-gray-900 border border-white/5 p-6 rounded-2xl flex flex-col justify-center text-center items-center">
+                    <div className="text-4xl font-extrabold text-accent">{stats.totalSeries}</div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-text-dim mt-2">Shows</div>
                   </div>
-                  <div className="bg-gray-900 border border-white/5 p-6 rounded-2xl">
-                    <div className="text-3xl font-black text-white">{stats.totalEpisodes}</div>
-                    <div className="text-[10px] font-black uppercase tracking-widest text-gray-500 mt-1">Episodes Logged</div>
+                  <div className="bg-gray-900 border border-white/5 p-6 rounded-2xl flex flex-col justify-center text-center items-center">
+                    <div className="text-4xl font-extrabold text-accent">{stats.totalEpisodes}</div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-text-dim mt-2">Episodes</div>
                   </div>
-                  <div className="bg-gray-900 border border-white/5 p-6 rounded-2xl">
-                    <div className="text-3xl font-black text-white">{Math.round((stats.movieWatchTime + stats.seriesWatchTime) / 60)}h</div>
-                    <div className="text-[10px] font-black uppercase tracking-widest text-gray-500 mt-1">Total Runtime</div>
+                  <div className="bg-gray-900 border border-white/5 p-6 rounded-2xl flex flex-col justify-center text-center items-center">
+                    <div className="text-4xl font-extrabold text-accent">{Math.round((stats.movieWatchTime + stats.seriesWatchTime) / 60)}<span className="text-xl">h</span></div>
+                    <div className="text-[10px] font-black uppercase tracking-widest text-text-dim mt-2">Total Time</div>
+                  </div>
+                </div>
+              )}
+
+              {stats?.topGenres && stats.topGenres.length > 0 && (
+                <div className="space-y-6">
+                  <h3 className="text-xs font-black uppercase tracking-widest text-gray-600 flex items-center gap-4">
+                     Your Top Genres
+                     <div className="h-[1px] flex-grow bg-white/5" />
+                  </h3>
+                  <div className="flex flex-wrap gap-3">
+                    {stats.topGenres.map((g: any, i: number) => (
+                      <div key={g.name} className="px-5 py-3 rounded-full border border-white/10 bg-white/5 text-sm font-bold flex items-center gap-3 hover:bg-white/10 transition-colors">
+                        <span className="text-accent">#{i + 1}</span>
+                        <span>{g.name}</span>
+                        <span className="text-[10px] bg-black/40 px-2 py-1 rounded border border-white/5 text-text-dim">{g.count}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
               
               <div className="space-y-6">
                 <h3 className="text-xs font-black uppercase tracking-widest text-gray-600 flex items-center gap-4">
-                   Recent Plays
+                   Last 10 Viewed
                    <div className="h-[1px] flex-grow bg-white/5" />
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {history.map((item) => (
+                  {history.slice(0, 10).map((item) => (
                     <div key={item.Id} className="bg-gray-900 p-6 rounded-2xl border border-white/5 flex justify-between items-center group hover:bg-gray-800 transition-all cursor-default">
                       <div className="space-y-2 flex-grow min-w-0 pr-4">
                         <div className="font-bold text-lg leading-tight text-white group-hover:text-accent transition-colors truncate">{item.Name}</div>
@@ -1638,27 +1865,6 @@ export default function App() {
             <AdminPanel user={user} />
           )}
 
-          {/* Bottom Section: Stats (Only on Discover) */}
-          {activeTab === 'discover' && stats && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mx-6 lg:mx-10 overflow-hidden">
-              <div className="glass-panel bg-black/20 rounded-[20px] p-6 flex flex-col justify-center text-center">
-                <div className="text-2xl font-extrabold text-accent">{stats.totalMovies}</div>
-                <div className="text-[10px] uppercase tracking-wider text-text-dim">Movies</div>
-              </div>
-              <div className="glass-panel bg-black/20 rounded-[20px] p-6 flex flex-col justify-center text-center">
-                <div className="text-2xl font-extrabold text-accent">{stats.totalSeries}</div>
-                <div className="text-[10px] uppercase tracking-wider text-text-dim">Series</div>
-              </div>
-              <div className="glass-panel bg-black/20 rounded-[20px] p-6 flex flex-col justify-center text-center">
-                <div className="text-2xl font-extrabold text-accent">{stats.totalEpisodes}</div>
-                <div className="text-[10px] uppercase tracking-wider text-text-dim">Episodes</div>
-              </div>
-              <div className="glass-panel bg-black/20 rounded-[20px] p-6 flex flex-col justify-center text-center">
-                <div className="text-2xl font-extrabold text-accent">{Math.round((stats.movieWatchTime + stats.seriesWatchTime) / 60)}h</div>
-                <div className="text-[10px] uppercase tracking-wider text-text-dim">Watch Time</div>
-              </div>
-            </div>
-          )}
         </main>
       </div>
 
